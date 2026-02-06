@@ -1,0 +1,16 @@
+FROM ghcr.io/astral-sh/uv:python3.12-alpine
+
+WORKDIR /app
+
+COPY pyproject.toml README.md LICENSE ./
+COPY nanobot/ nanobot/
+RUN mkdir -p bridge && touch bridge/__init__.py
+
+RUN uv pip install --system --no-cache . && rm -rf bridge
+
+RUN mkdir -p /root/.nanobot
+
+EXPOSE 18790
+
+ENTRYPOINT ["nanobot"]
+CMD ["status"]
