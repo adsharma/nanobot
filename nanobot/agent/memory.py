@@ -1,5 +1,6 @@
 """Memory system for persistent agent memory."""
 
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
@@ -8,6 +9,8 @@ from contextlib import contextmanager
 import pgembed
 import sqlalchemy as sa
 from sqlalchemy_utils import database_exists, create_database
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path.home() / ".nanobot"
 
@@ -106,6 +109,7 @@ class MemoryStore:
                     """),
                     {"date_key": date_key, "content": new_content, "now": now},
                 )
+            logger.info(f"[memory] appended to today's notes ({date_key})")
         except Exception:
             pass
 
@@ -136,6 +140,7 @@ class MemoryStore:
                     """),
                     {"content": content, "now": now},
                 )
+            logger.info("[memory] wrote to long-term memory")
         except Exception:
             pass
 

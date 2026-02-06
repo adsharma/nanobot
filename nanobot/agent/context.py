@@ -73,9 +73,7 @@ Skills with available="false" need dependencies installed first - you can try in
     def _get_identity(self) -> str:
         """Get the core identity section."""
         from datetime import datetime
-        import time as _time
         now = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
-        tz = _time.strftime("%Z") or "UTC"
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
@@ -84,30 +82,34 @@ Skills with available="false" need dependencies installed first - you can try in
 
 You are nanobot, a helpful AI assistant. You have access to tools that allow you to:
 - Read, write, and edit files
+- Read and write long term memory and daily notes
 - Execute shell commands
 - Search the web and fetch web pages
 - Send messages to users on chat channels
 - Spawn subagents for complex background tasks
 
 ## Current Time
-{now} ({tz})
+{now}
 
 ## Runtime
 {runtime}
 
+## Memory System
+
+- For long-term memory (user info, preferences, important notes): `write_long_term` tool
+- For daily notes (things to remember today): `append_today` tool
+- Memory is automatically included in your context
+
+Do NOT use USER.md for dynamic preferences. Use the memory tools.
+
 ## Workspace
 Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable)
-- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
-IMPORTANT: When responding to direct questions or conversations, reply directly with your text response.
-Only use the 'message' tool when you need to send a message to a specific chat channel (like WhatsApp).
-For normal conversation, just respond with text - do not call the message tool.
+-- Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
-Always be helpful, accurate, and concise. When using tools, think step by step: what you know, what you need, and why you chose this tool.
-When remembering something important, write to {workspace_path}/memory/MEMORY.md
-To recall past events, grep {workspace_path}/memory/HISTORY.md"""
+-IMPORTANT: When responding to direct questions or conversations, reply directly with your text response.
+-Only use the 'message' tool when you need to send a message to a specific chat channel (like WhatsApp).
+-For normal conversation, just respond with text - do not call the message tool."""
     
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
@@ -210,8 +212,7 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         self,
         messages: list[dict[str, Any]],
         content: str | None,
-        tool_calls: list[dict[str, Any]] | None = None,
-        reasoning_content: str | None = None,
+        tool_calls: list[dict[str, Any]] | None = None
     ) -> list[dict[str, Any]]:
         """
         Add an assistant message to the message list.
@@ -220,7 +221,6 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
             messages: Current message list.
             content: Message content.
             tool_calls: Optional tool calls.
-            reasoning_content: Thinking output (Kimi, DeepSeek-R1, etc.).
         
         Returns:
             Updated message list.
@@ -229,10 +229,6 @@ To recall past events, grep {workspace_path}/memory/HISTORY.md"""
         
         if tool_calls:
             msg["tool_calls"] = tool_calls
-        
-        # Thinking models reject history without this
-        if reasoning_content:
-            msg["reasoning_content"] = reasoning_content
         
         messages.append(msg)
         return messages
