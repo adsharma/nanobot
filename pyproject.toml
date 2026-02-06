@@ -39,6 +39,8 @@ dependencies = [
     "python-socks[asyncio]>=2.4.0",
     "prompt-toolkit>=3.0.0",
     "pgembed>=0.1.0",
+    "psycopg2-binary>=2.9.11",
+    "duckdb>=1.0.0",
     "sqlalchemy>=2.0.0",
     "sqlalchemy-utils>=0.41.0",
 ]
