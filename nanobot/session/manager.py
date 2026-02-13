@@ -145,16 +145,17 @@ class SessionManager:
         """Save a session to database."""
         try:
             with self._get_connection() as conn:
+                # First, save session record
                 conn.execute(
                     sa.text("""
                         INSERT INTO sessions (key, created_at, updated_at, metadata)
-                        VALUES (:key, :created_at, :updated_at, :metadata::jsonb)
+                        VALUES (:session_key, :created_at, :updated_at, CAST(:metadata AS jsonb))
                         ON CONFLICT (key) DO UPDATE SET
                             updated_at = :updated_at,
-                            metadata = :metadata::jsonb
+                            metadata = CAST(:metadata AS jsonb)
                     """),
                     {
-                        "key": session.key,
+                        "session_key": session.key,
                         "created_at": session.created_at,
                         "updated_at": session.updated_at,
                         "metadata": json.dumps(session.metadata),
@@ -162,17 +163,25 @@ class SessionManager:
                 )
                 # Delete old messages
                 conn.execute(
-                    sa.text("DELETE FROM session_messages WHERE session_key = :key"),
-                    {"key": session.key},
+                    sa.text("DELETE FROM session_messages WHERE session_key = :session_key"),
+                    {"session_key": session.key},
                 )
                 # Insert new messages
                 for i, msg in enumerate(session.messages):
-                    conn.execute(
-                        sa.text(
-                            "INSERT INTO session_messages (session_key, message_index, message) VALUES (:key, :index, :message::jsonb)"
-                        ),
-                        {"key": session.key, "index": i, "message": json.dumps(msg)},
-                    )
+                    try:
+                        # msg might already be a dict from JSONB, don't double-encode
+                        msg_json = json.dumps(msg) if not isinstance(msg, str) else msg
+                        conn.execute(
+                            sa.text(
+                                "INSERT INTO session_messages (session_key, message_index, message) VALUES (:session_key, :msg_index, CAST(:message AS jsonb))"
+                            ),
+                            {"session_key": session.key, "msg_index": i, "message": msg_json},
+                        )
+                    except Exception as msg_error:
+                        logger.error(
+                            f"Failed to save message {i} for session {session.key}: {msg_error}, msg type: {type(msg)}, msg: {msg}"
+                        )
+                        raise
             self._cache[session.key] = session
         except Exception as e:
             logger.error(f"Failed to save session {session.key}: {e}", exc_info=True)
