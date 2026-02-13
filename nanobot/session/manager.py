@@ -72,37 +72,41 @@ class SessionManager:
     @contextmanager
     def _get_connection(self):
         """Get a database connection."""
-        with pgembed.get_server(self.pg_dir) as pg:
-            uri = pg.get_uri(self.database_name)
-            if not database_exists(uri):
-                create_database(uri)
-            engine = sa.create_engine(uri, isolation_level="AUTOCOMMIT")
-            conn = engine.connect()
-            try:
-                with conn.begin():
-                    conn.execute(
-                        sa.text("""
-                        CREATE TABLE IF NOT EXISTS sessions (
-                            key VARCHAR(255) PRIMARY KEY,
-                            created_at TIMESTAMP NOT NULL,
-                            updated_at TIMESTAMP NOT NULL,
-                            metadata JSONB
+        try:
+            with pgembed.get_server(self.pg_dir) as pg:
+                uri = pg.get_uri(self.database_name)
+                if not database_exists(uri):
+                    create_database(uri)
+                engine = sa.create_engine(uri, isolation_level="AUTOCOMMIT")
+                conn = engine.connect()
+                try:
+                    with conn.begin():
+                        conn.execute(
+                            sa.text("""
+                            CREATE TABLE IF NOT EXISTS sessions (
+                                key VARCHAR(255) PRIMARY KEY,
+                                created_at TIMESTAMP NOT NULL,
+                                updated_at TIMESTAMP NOT NULL,
+                                metadata JSONB
+                            )
+                        """)
                         )
-                    """)
-                    )
-                    conn.execute(
-                        sa.text("""
-                        CREATE TABLE IF NOT EXISTS session_messages (
-                            session_key VARCHAR(255) REFERENCES sessions(key) ON DELETE CASCADE,
-                            message_index INT,
-                            message JSONB NOT NULL,
-                            PRIMARY KEY (session_key, message_index)
+                        conn.execute(
+                            sa.text("""
+                            CREATE TABLE IF NOT EXISTS session_messages (
+                                session_key VARCHAR(255) REFERENCES sessions(key) ON DELETE CASCADE,
+                                message_index INT,
+                                message JSONB NOT NULL,
+                                PRIMARY KEY (session_key, message_index)
+                            )
+                        """)
                         )
-                    """)
-                    )
-                yield conn
-            finally:
-                conn.close()
+                    yield conn
+                finally:
+                    conn.close()
+        except Exception as e:
+            logger.error(f"Failed to initialize database connection: {e}", exc_info=True)
+            raise
 
     def _load(self, key: str) -> Session | None:
         """Load a session from database."""
@@ -134,27 +138,26 @@ class SessionManager:
                     metadata=metadata_json if metadata_json else {},
                 )
         except Exception as e:
-            logger.warning(f"Failed to load session {key}: {e}")
+            logger.error(f"Failed to load session {key}: {e}", exc_info=True)
             return None
 
     def save(self, session: Session) -> None:
         """Save a session to database."""
         try:
             with self._get_connection() as conn:
-                metadata_json = json.dumps(session.metadata)
                 conn.execute(
                     sa.text("""
                         INSERT INTO sessions (key, created_at, updated_at, metadata)
-                        VALUES (:key, :created_at, :updated_at, :metadata)
+                        VALUES (:key, :created_at, :updated_at, :metadata::jsonb)
                         ON CONFLICT (key) DO UPDATE SET
                             updated_at = :updated_at,
-                            metadata = :metadata
+                            metadata = :metadata::jsonb
                     """),
                     {
                         "key": session.key,
                         "created_at": session.created_at,
                         "updated_at": session.updated_at,
-                        "metadata": metadata_json,
+                        "metadata": json.dumps(session.metadata),
                     },
                 )
                 # Delete old messages
@@ -164,16 +167,15 @@ class SessionManager:
                 )
                 # Insert new messages
                 for i, msg in enumerate(session.messages):
-                    msg_json = json.dumps(msg)
                     conn.execute(
                         sa.text(
-                            "INSERT INTO session_messages (session_key, message_index, message) VALUES (:key, :index, :message)"
+                            "INSERT INTO session_messages (session_key, message_index, message) VALUES (:key, :index, :message::jsonb)"
                         ),
-                        {"key": session.key, "index": i, "message": msg_json},
+                        {"key": session.key, "index": i, "message": json.dumps(msg)},
                     )
             self._cache[session.key] = session
         except Exception as e:
-            logger.error(f"Failed to save session {session.key}: {e}")
+            logger.error(f"Failed to save session {session.key}: {e}", exc_info=True)
 
     def get_or_create(self, key: str) -> Session:
         """Get an existing session or create a new one."""

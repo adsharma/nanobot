@@ -35,45 +35,49 @@ class MemoryStore:
     @contextmanager
     def _get_connection(self):
         """Get a database connection."""
-        with pgembed.get_server(self.pg_dir) as pg:
-            uri = pg.get_uri(self.database_name)
-            if not database_exists(uri):
-                create_database(uri)
-            engine = sa.create_engine(uri, isolation_level="AUTOCOMMIT")
-            conn = engine.connect()
-            try:
-                with conn.begin():
-                    conn.execute(
-                        sa.text("""
-                        CREATE TABLE IF NOT EXISTS memories (
-                            id SERIAL PRIMARY KEY,
-                            memory_type VARCHAR(50) NOT NULL,
-                            date_key VARCHAR(50) NOT NULL,
-                            content TEXT NOT NULL,
-                            created_at TIMESTAMP NOT NULL,
-                            updated_at TIMESTAMP NOT NULL
+        try:
+            with pgembed.get_server(self.pg_dir) as pg:
+                uri = pg.get_uri(self.database_name)
+                if not database_exists(uri):
+                    create_database(uri)
+                engine = sa.create_engine(uri, isolation_level="AUTOCOMMIT")
+                conn = engine.connect()
+                try:
+                    with conn.begin():
+                        conn.execute(
+                            sa.text("""
+                            CREATE TABLE IF NOT EXISTS memories (
+                                id SERIAL PRIMARY KEY,
+                                memory_type VARCHAR(50) NOT NULL,
+                                date_key VARCHAR(50) NOT NULL,
+                                content TEXT NOT NULL,
+                                created_at TIMESTAMP NOT NULL,
+                                updated_at TIMESTAMP NOT NULL
+                            )
+                        """)
                         )
-                    """)
-                    )
-                    conn.execute(
-                        sa.text("""
-                        CREATE INDEX IF NOT EXISTS idx_memories_type_date
-                        ON memories (memory_type, date_key)
-                    """)
-                    )
-                    conn.execute(
-                        sa.text("""
-                        CREATE TABLE IF NOT EXISTS user_preferences (
-                            id SERIAL PRIMARY KEY,
-                            preference_type VARCHAR(20) NOT NULL,
-                            item VARCHAR(255) NOT NULL,
-                            created_at TIMESTAMP NOT NULL
+                        conn.execute(
+                            sa.text("""
+                            CREATE INDEX IF NOT EXISTS idx_memories_type_date
+                            ON memories (memory_type, date_key)
+                        """)
                         )
-                    """)
-                    )
-                yield conn
-            finally:
-                conn.close()
+                        conn.execute(
+                            sa.text("""
+                            CREATE TABLE IF NOT EXISTS user_preferences (
+                                id SERIAL PRIMARY KEY,
+                                preference_type VARCHAR(20) NOT NULL,
+                                item VARCHAR(255) NOT NULL,
+                                created_at TIMESTAMP NOT NULL
+                            )
+                        """)
+                        )
+                    yield conn
+                finally:
+                    conn.close()
+        except Exception as e:
+            logger.error(f"Failed to initialize memory database connection: {e}", exc_info=True)
+            raise
 
     def _get_date_key(self, dt: Optional[datetime] = None) -> str:
         """Get date key for a datetime."""
@@ -93,7 +97,8 @@ class MemoryStore:
                 )
                 row = result.fetchone()
                 return row[0] if row else ""
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to read today's memory: {e}", exc_info=True)
             return ""
 
     def append_today(self, content: str) -> None:
@@ -120,8 +125,8 @@ class MemoryStore:
                     {"date_key": date_key, "content": new_content, "now": now},
                 )
             logger.info(f"[memory] appended to today's notes ({date_key})")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to append to today's memory: {e}", exc_info=True)
 
     def read_long_term(self) -> str:
         """Read long-term memory."""
@@ -146,7 +151,8 @@ class MemoryStore:
                 if dislikes:
                     parts.append("User dislikes:\n" + "\n".join(f"- {item}" for item in dislikes))
                 return "\n\n".join(parts)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to read long-term memory: {e}", exc_info=True)
             return ""
 
     def write_long_term(self, content: str) -> None:
@@ -189,8 +195,8 @@ class MemoryStore:
                         {"item": item, "now": now},
                     )
             logger.info("[memory] wrote to long-term memory")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to write long-term memory: {e}", exc_info=True)
 
     def get_recent_memories(self, days: int = 7) -> str:
         """Get memories from the last N days."""
@@ -212,7 +218,8 @@ class MemoryStore:
                     row = result.fetchone()
                     if row:
                         memories.append(row[0])
-            except Exception:
+            except Exception as e:
+                logger.error(f"Failed to read memory for {date_key}: {e}", exc_info=True)
                 continue
 
         return "\n\n---\n\n".join(memories)
@@ -227,7 +234,8 @@ class MemoryStore:
                     )
                 )
                 return [(row[0], row[1]) for row in result.fetchall()]
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to list memory files: {e}", exc_info=True)
             return []
 
     def get_memory_context(self) -> str:
