@@ -125,13 +125,13 @@ class SessionManager:
                     ),
                     {"key": key},
                 )
-                messages = [json.loads(row[0]) for row in messages_result.fetchall()]
+                messages = [row[0] for row in messages_result.fetchall()]
                 return Session(
                     key=key,
                     messages=messages,
                     created_at=created_at,
                     updated_at=updated_at,
-                    metadata=json.loads(metadata_json) if metadata_json else {},
+                    metadata=metadata_json if metadata_json else {},
                 )
         except Exception as e:
             logger.warning(f"Failed to load session {key}: {e}")
