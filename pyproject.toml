@@ -38,6 +38,9 @@ dependencies = [
     "qq-botpy>=1.0.0",
     "python-socks[asyncio]>=2.4.0",
     "prompt-toolkit>=3.0.0",
+    "pgembed>=0.1.0",
+    "sqlalchemy>=2.0.0",
+    "sqlalchemy-utils>=0.41.0",
 ]
 
 [project.optional-dependencies]
