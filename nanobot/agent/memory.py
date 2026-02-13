@@ -61,6 +61,16 @@ class MemoryStore:
                         ON memories (memory_type, date_key)
                     """)
                     )
+                    conn.execute(
+                        sa.text("""
+                        CREATE TABLE IF NOT EXISTS user_preferences (
+                            id SERIAL PRIMARY KEY,
+                            preference_type VARCHAR(20) NOT NULL,
+                            item VARCHAR(255) NOT NULL,
+                            created_at TIMESTAMP NOT NULL
+                        )
+                    """)
+                    )
                 yield conn
             finally:
                 conn.close()
@@ -118,10 +128,24 @@ class MemoryStore:
         try:
             with self._get_connection() as conn:
                 result = conn.execute(
-                    sa.text("SELECT content FROM memories WHERE memory_type = 'longterm' LIMIT 1")
+                    sa.text(
+                        "SELECT preference_type, item FROM user_preferences ORDER BY created_at"
+                    )
                 )
-                row = result.fetchone()
-                return row[0] if row else ""
+                likes = []
+                dislikes = []
+                for row in result.fetchall():
+                    pref_type, item = row
+                    if pref_type == "like":
+                        likes.append(item)
+                    elif pref_type == "dislike":
+                        dislikes.append(item)
+                parts = []
+                if likes:
+                    parts.append("User likes:\n" + "\n".join(f"- {item}" for item in likes))
+                if dislikes:
+                    parts.append("User dislikes:\n" + "\n".join(f"- {item}" for item in dislikes))
+                return "\n\n".join(parts)
         except Exception:
             return ""
 
@@ -129,17 +153,41 @@ class MemoryStore:
         """Write to long-term memory."""
         now = datetime.now()
         try:
+            # Parse the content
+            likes = []
+            dislikes = []
+            lines = content.split("\n")
+            current = None
+            for line in lines:
+                line = line.strip()
+                if line.startswith("User likes:"):
+                    current = "likes"
+                elif line.startswith("User dislikes:"):
+                    current = "dislikes"
+                elif line.startswith("- ") and current:
+                    item = line[2:].strip()
+                    if current == "likes":
+                        likes.append(item)
+                    elif current == "dislikes":
+                        dislikes.append(item)
             with self._get_connection() as conn:
-                conn.execute(
-                    sa.text("""
-                        INSERT INTO memories (memory_type, date_key, content, created_at, updated_at)
-                        VALUES ('longterm', 'global', :content, :now, :now)
-                        ON CONFLICT (memory_type) DO UPDATE SET
-                            content = :content,
-                            updated_at = :now
-                    """),
-                    {"content": content, "now": now},
-                )
+                # Delete old preferences
+                conn.execute(sa.text("DELETE FROM user_preferences"))
+                # Insert new
+                for item in likes:
+                    conn.execute(
+                        sa.text(
+                            "INSERT INTO user_preferences (preference_type, item, created_at) VALUES ('like', :item, :now)"
+                        ),
+                        {"item": item, "now": now},
+                    )
+                for item in dislikes:
+                    conn.execute(
+                        sa.text(
+                            "INSERT INTO user_preferences (preference_type, item, created_at) VALUES ('dislike', :item, :now)"
+                        ),
+                        {"item": item, "now": now},
+                    )
             logger.info("[memory] wrote to long-term memory")
         except Exception:
             pass

@@ -86,8 +86,17 @@ class SessionManager:
                             key VARCHAR(255) PRIMARY KEY,
                             created_at TIMESTAMP NOT NULL,
                             updated_at TIMESTAMP NOT NULL,
-                            metadata TEXT,
-                            messages TEXT NOT NULL
+                            metadata JSONB
+                        )
+                    """)
+                    )
+                    conn.execute(
+                        sa.text("""
+                        CREATE TABLE IF NOT EXISTS session_messages (
+                            session_key VARCHAR(255) REFERENCES sessions(key) ON DELETE CASCADE,
+                            message_index INT,
+                            message JSONB NOT NULL,
+                            PRIMARY KEY (session_key, message_index)
                         )
                     """)
                     )
@@ -101,17 +110,25 @@ class SessionManager:
             with self._get_connection() as conn:
                 result = conn.execute(
                     sa.text(
-                        "SELECT created_at, updated_at, metadata, messages FROM sessions WHERE key = :key"
+                        "SELECT created_at, updated_at, metadata FROM sessions WHERE key = :key"
                     ),
                     {"key": key},
                 )
                 row = result.fetchone()
                 if row is None:
                     return None
-                created_at, updated_at, metadata_json, messages_json = row
+                created_at, updated_at, metadata_json = row
+                # Load messages
+                messages_result = conn.execute(
+                    sa.text(
+                        "SELECT message FROM session_messages WHERE session_key = :key ORDER BY message_index"
+                    ),
+                    {"key": key},
+                )
+                messages = [json.loads(row[0]) for row in messages_result.fetchall()]
                 return Session(
                     key=key,
-                    messages=json.loads(messages_json) if messages_json else [],
+                    messages=messages,
                     created_at=created_at,
                     updated_at=updated_at,
                     metadata=json.loads(metadata_json) if metadata_json else {},
@@ -125,24 +142,35 @@ class SessionManager:
         try:
             with self._get_connection() as conn:
                 metadata_json = json.dumps(session.metadata)
-                messages_json = json.dumps(session.messages)
                 conn.execute(
                     sa.text("""
-                        INSERT INTO sessions (key, created_at, updated_at, metadata, messages)
-                        VALUES (:key, :created_at, :updated_at, :metadata, :messages)
+                        INSERT INTO sessions (key, created_at, updated_at, metadata)
+                        VALUES (:key, :created_at, :updated_at, :metadata)
                         ON CONFLICT (key) DO UPDATE SET
                             updated_at = :updated_at,
-                            metadata = :metadata,
-                            messages = :messages
+                            metadata = :metadata
                     """),
                     {
                         "key": session.key,
                         "created_at": session.created_at,
                         "updated_at": session.updated_at,
                         "metadata": metadata_json,
-                        "messages": messages_json,
                     },
                 )
+                # Delete old messages
+                conn.execute(
+                    sa.text("DELETE FROM session_messages WHERE session_key = :key"),
+                    {"key": session.key},
+                )
+                # Insert new messages
+                for i, msg in enumerate(session.messages):
+                    msg_json = json.dumps(msg)
+                    conn.execute(
+                        sa.text(
+                            "INSERT INTO session_messages (session_key, message_index, message) VALUES (:key, :index, :message)"
+                        ),
+                        {"key": session.key, "index": i, "message": msg_json},
+                    )
             self._cache[session.key] = session
         except Exception as e:
             logger.error(f"Failed to save session {session.key}: {e}")
